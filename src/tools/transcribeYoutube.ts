@@ -1,7 +1,19 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { basename } from "node:path";
+import { tmpdir } from "node:os";
 import { OPENAI_API_KEY, WHISPER_LANGUAGE, WHISPER_MODEL } from "../config.js";
+
+let cookiesPath: string | null = null;
+async function ensureYoutubeCookies(): Promise<string | null> {
+  if (cookiesPath) return cookiesPath;
+  const b64 = process.env.YOUTUBE_COOKIES_B64;
+  if (!b64) return null;
+  const path = `${tmpdir()}/yt-cookies.txt`;
+  await writeFile(path, Buffer.from(b64, "base64"));
+  cookiesPath = path;
+  return path;
+}
 
 export interface TranscribeInput {
   youtubeUrl: string;
@@ -49,14 +61,21 @@ export async function transcribeYoutube(
   const audioPath = `${base}.mp3`;
 
   // yt-dlp → mono 64kbps mp3 (small enough for OpenAI's 25MB limit even on 30+ min sources)
-  await run("yt-dlp", [
+  // Datacenter IPs (Fly) trip YouTube's bot detection, so we authenticate with
+  // a Netscape-format cookies file shipped via the YOUTUBE_COOKIES_B64 secret.
+  // player_client diversification helps when YouTube's primary client is rate-limited.
+  const ytCookies = await ensureYoutubeCookies();
+  const ytArgs = [
     "-x",
     "--audio-format", "mp3",
     "--audio-quality", "64K",
     "--postprocessor-args", "ffmpeg:-ac 1 -ar 16000",
+    "--extractor-args", "youtube:player_client=ios,android,web",
+    ...(ytCookies ? ["--cookies", ytCookies] : []),
     "-o", `${base}.%(ext)s`,
     input.youtubeUrl,
-  ]);
+  ];
+  await run("yt-dlp", ytArgs);
 
   const s = await stat(audioPath);
   if (s.size > OPENAI_FILE_LIMIT_BYTES) {

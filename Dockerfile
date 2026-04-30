@@ -7,7 +7,7 @@ FROM node:22-bookworm-slim
 #  - dumb-init: clean PID 1 signal handling
 #  - fonts: ensure captions render
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      bash git ca-certificates curl wget gnupg dumb-init \
+      bash git ca-certificates curl wget gnupg dumb-init unzip \
       ffmpeg \
       python3 python3-pip \
       fonts-dejavu fonts-liberation \
@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       > /etc/apt/sources.list.d/google-chrome.list \
  && apt-get update && apt-get install -y --no-install-recommends google-chrome-stable \
  && pip3 install --no-cache-dir --break-system-packages yt-dlp \
+ && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s -- -y \
  && apt-get clean && rm -rf /var/lib/apt/lists/* \
  && useradd -ms /bin/bash agent
 
