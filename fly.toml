@@ -1,0 +1,23 @@
+app = 'longform-tiktok-viral-creator-agent'
+primary_region = 'cdg'
+
+[build]
+
+# One-shot per-trigger job: never restart on exit. The GH Actions workflow
+# (workflow_dispatch with a youtube_url input) is the only thing that should
+# wake this machine. Without this, Fly retries the CMD up to 10× on failure —
+# wasting Anthropic + fal.ai + ElevenLabs credits on every transient error.
+[[restart]]
+  policy = "no"
+
+# 4GB is the floor for Hyperframes rendering ~22 video clips on one Chrome
+# page. Local 8GB Mac OOMs at this clip count; this VM has dedicated headroom.
+[[vm]]
+  memory = '4gb'
+  cpu_kind = 'shared'
+  cpus = 2
+
+[[mounts]]
+  source = 'longform_data'
+  destination = '/app/data'
+  initial_size = '5gb'
