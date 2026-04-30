@@ -278,7 +278,6 @@ export async function renderVideo(input: RenderVideoInput): Promise<RenderVideoO
     "-o", videoPath,
     "-f", String(RENDER_FPS),
     "-q", "standard",
-    "--quiet",
   ]);
 
   return { htmlPath, projectDir, videoPath, totalDurationSec: input.totalDurationSec };
