@@ -65,7 +65,7 @@ jobs:
             exit 1
           fi
           echo "Updating machine $ID → $FLY_IMAGE"
-          flyctl machine update "$ID" --image "$FLY_IMAGE" --restart no --app "$FLY_APP" --yes
+          flyctl machine update "$ID" --image "$FLY_IMAGE" --restart never --app "$FLY_APP" --yes
 
   run:
     name: Wake Fly machine for one render
@@ -101,7 +101,7 @@ jobs:
           flyctl machine update "$ID" \
             --env "CHANNEL=$CHANNEL" \
             --env "YOUTUBE_URL=$YOUTUBE_URL" \
-            --restart no \
+            --restart never \
             --app "$FLY_APP" \
             --yes
 

@@ -8,7 +8,7 @@ primary_region = 'cdg'
 # wake this machine. Without this, Fly retries the CMD up to 10× on failure —
 # wasting Anthropic + fal.ai + ElevenLabs credits on every transient error.
 [[restart]]
-  policy = "no"
+  policy = "never"
 
 # 4GB is the floor for Hyperframes rendering ~22 video clips on one Chrome
 # page. Local 8GB Mac OOMs at this clip count; this VM has dedicated headroom.
