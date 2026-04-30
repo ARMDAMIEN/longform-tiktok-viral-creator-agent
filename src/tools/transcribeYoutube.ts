@@ -60,17 +60,19 @@ export async function transcribeYoutube(
   const base = `${sourcesDir}${stamp}`;
   const audioPath = `${base}.mp3`;
 
-  // yt-dlp → mono 64kbps mp3 (small enough for OpenAI's 25MB limit even on 30+ min sources)
-  // Datacenter IPs (Fly) trip YouTube's bot detection, so we authenticate with
-  // a Netscape-format cookies file shipped via the YOUTUBE_COOKIES_B64 secret.
-  // player_client diversification helps when YouTube's primary client is rate-limited.
+  // yt-dlp → mono 64kbps mp3 (small enough for OpenAI's 25MB limit even on 30+ min sources).
+  // Datacenter IPs (Fly) trip YouTube's bot detection, so we authenticate with a Netscape-
+  // format cookies file shipped via the YOUTUBE_COOKIES_B64 secret. The cookies path forces
+  // yt-dlp to use the `web` client (the only one that supports cookies). The web client
+  // requires solving an `n` challenge in JS, which yt-dlp delegates to deno + the EJS
+  // solver script downloaded from GitHub at runtime via --remote-components.
   const ytCookies = await ensureYoutubeCookies();
   const ytArgs = [
     "-x",
     "--audio-format", "mp3",
     "--audio-quality", "64K",
     "--postprocessor-args", "ffmpeg:-ac 1 -ar 16000",
-    "--extractor-args", "youtube:player_client=ios,android,web",
+    "--remote-components", "ejs:github",
     ...(ytCookies ? ["--cookies", ytCookies] : []),
     "-o", `${base}.%(ext)s`,
     input.youtubeUrl,
