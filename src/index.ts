@@ -1,7 +1,13 @@
 import "dotenv/config";
 import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { CLAUDE_MODEL } from "./config.js";
+import { CLAUDE_MODEL, PROJECT_ROOT } from "./config.js";
+
+// The agent-sdk shells out to a native `claude` binary. Auto-detection of the
+// binary fails on Debian glibc (the SDK looks at the linux-x64-musl variant).
+// We bundle @anthropic-ai/claude-code as a dep — its install.cjs downloads the
+// right native binary at `bin/claude.exe` regardless of host platform.
+const CLAUDE_BIN = `${PROJECT_ROOT}node_modules/@anthropic-ai/claude-code/bin/claude.exe`;
 import { getChannel } from "./channels/index.js";
 import { buildSystemPrompt } from "./prompts.js";
 import { readAnalysis } from "./tools/readAnalysis.js";
@@ -333,6 +339,7 @@ async function main() {
       permissionMode: "bypassPermissions",
       maxTurns: 60,
       sandbox: { enabled: false, failIfUnavailable: false },
+      pathToClaudeCodeExecutable: CLAUDE_BIN,
       stderr: (data: string) => process.stderr.write(`[cli-stderr] ${data}`),
     } as any,
   })) {
