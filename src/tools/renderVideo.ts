@@ -287,12 +287,16 @@ export async function renderVideo(input: RenderVideoInput): Promise<RenderVideoO
 
   const videoPath = `${input.videosDir}${stamp}.mp4`;
   const hfBin = `${PROJECT_ROOT}node_modules/.bin/hyperframes`;
+  // -w 1: serialize Chrome workers. Default 'auto' opens N pages × M videos
+  // simultaneously, blowing past Chrome's media-element parsing budget.
+  // One worker still uses both vCPUs for ffmpeg encoding.
   await run(hfBin, [
     "render",
     projectDir,
     "-o", videoPath,
     "-f", String(RENDER_FPS),
     "-q", "standard",
+    "-w", "1",
   ]);
 
   return { htmlPath, projectDir, videoPath, totalDurationSec: input.totalDurationSec };
