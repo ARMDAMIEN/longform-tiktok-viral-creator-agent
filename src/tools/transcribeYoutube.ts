@@ -57,6 +57,7 @@ async function transcribeViaYtdlp(input: TranscribeInput, sourcesDir: string, ba
 
   const audioPath = `${base}.mp3`;
   const ytCookies = await ensureYoutubeCookies();
+  console.log(`    🍪 cookies: ${ytCookies ? `${ytCookies} (env len=${(process.env.YOUTUBE_COOKIES_B64 ?? "").length})` : "NONE — YOUTUBE_COOKIES_B64 env empty"}`);
   const ytArgs = [
     "-x",
     "--audio-format", "mp3",
@@ -67,6 +68,7 @@ async function transcribeViaYtdlp(input: TranscribeInput, sourcesDir: string, ba
     "-o", `${base}.%(ext)s`,
     input.youtubeUrl,
   ];
+  console.log(`    🐛 yt-dlp argv: ${ytArgs.join(" ")}`);
   await run("yt-dlp", ytArgs);
 
   const s = await stat(audioPath);
