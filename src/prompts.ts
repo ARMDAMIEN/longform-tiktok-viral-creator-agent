@@ -9,7 +9,7 @@ Your mission: produce ONE narrated 1m05–1m30 vertical video for the "${channel
 
 1. **read_analysis** — load every report from "${channel.name}"'s analyses folder. Files are concatenated with \`---\` separators. Extract the shared virality levers across them.
 
-2. **transcribe_youtube** — call with the YOUTUBE_URL provided in the task prompt. Returns { audioPath, transcriptPath, durationSec, fullText, segments }. Use \`fullText\` and skim \`segments\` to identify the most quotable / most loaded narrative beats.
+2. **transcribe_youtube** — your task prompt provides EITHER an AUDIO_URL (preferred — pre-uploaded mp3, bypasses bot detection) OR a YOUTUBE_URL. Pass it as \`audioUrl\` (preferred) or \`youtubeUrl\` to the tool — never both. Returns { audioPath, transcriptPath, durationSec, fullText, segments, source }. Use \`fullText\` and skim \`segments\` to identify the most quotable / most loaded narrative beats.
 
 3. **Synthesize the script** in your head, in French, ~150–220 words, 65–90s of voiced content. The script MUST follow this structure:
 

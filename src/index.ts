@@ -22,9 +22,10 @@ import { saveRun } from "./tools/saveRun.js";
 import { saveToNotion } from "./tools/saveToNotion.js";
 
 const channel = getChannel(process.env.CHANNEL);
-const youtubeUrl = process.env.YOUTUBE_URL;
-if (!youtubeUrl) {
-  throw new Error("YOUTUBE_URL env var is required. Pass the input YouTube source video.");
+const youtubeUrl = process.env.YOUTUBE_URL ?? "";
+const audioUrl = process.env.AUDIO_URL ?? "";
+if (!youtubeUrl && !audioUrl) {
+  throw new Error("Either YOUTUBE_URL or AUDIO_URL env var is required. AUDIO_URL (a pre-uploaded mp3) is recommended on Fly to bypass YouTube bot detection.");
 }
 
 // ─── Tool definitions (closed over channel) ─────────────────────────────────
@@ -48,15 +49,17 @@ const readAnalysisTool = tool(
 
 const transcribeYoutubeTool = tool(
   "transcribe_youtube",
-  "Download audio from a YouTube URL via yt-dlp, transcribe via local whisper.cpp. Returns { youtubeUrl, audioPath, transcriptPath, language, durationSec, fullText, segments }.",
+  "Transcribe the source video. Pass `audioUrl` (a pre-uploaded mp3 — preferred when running on Fly to bypass YouTube bot detection) OR `youtubeUrl` (yt-dlp + Whisper, falls back to YouTube captions). Returns { youtubeUrl, audioPath, transcriptPath, language, durationSec, fullText, segments, source }.",
   {
-    youtubeUrl: z.string().url().describe("The source YouTube video URL."),
+    audioUrl: z.string().url().optional().describe("Public URL of a pre-uploaded mp3 (e.g. fal.media). Use this on Fly. Generated locally via `npm run upload-source`."),
+    youtubeUrl: z.string().url().optional().describe("YouTube URL — only works when yt-dlp can authenticate (cookies + non-flagged IP)."),
   },
   async (args) => {
-    console.log(`  🎙️  transcribe_youtube ${args.youtubeUrl}`);
+    const label = args.audioUrl ? `audioUrl ${args.audioUrl.slice(0, 60)}…` : `youtubeUrl ${args.youtubeUrl}`;
+    console.log(`  🎙️  transcribe_youtube ${label}`);
     try {
-      const r = await transcribeYoutube({ youtubeUrl: args.youtubeUrl }, channel.sourcesDir);
-      console.log(`    → ${r.segments.length} segments, ${r.durationSec.toFixed(1)}s`);
+      const r = await transcribeYoutube({ youtubeUrl: args.youtubeUrl, audioUrl: args.audioUrl }, channel.sourcesDir);
+      console.log(`    → ${r.segments.length} segments, ${r.durationSec.toFixed(1)}s (source=${r.source})`);
       return { content: [{ type: "text" as const, text: JSON.stringify(r) }] };
     } catch (err) {
       return { content: [{ type: "text" as const, text: `transcribe_youtube failed: ${err}` }], isError: true };
@@ -318,14 +321,20 @@ const mcpServer = createSdkMcpServer({
 
 // ─── Task prompt ────────────────────────────────────────────────────────────
 
-const taskPrompt = `Produce one 1m05–1m30 narrated vertical video for the "${channel.name}" channel from the source YouTube video.
+const taskPrompt = audioUrl
+  ? `Produce one 1m05–1m30 narrated vertical video for the "${channel.name}" channel from the pre-uploaded source audio.
+
+AUDIO_URL = ${audioUrl}
+${youtubeUrl ? `YOUTUBE_URL = ${youtubeUrl} (informational — do NOT pass to transcribe_youtube; the agent already has audioUrl)\n` : ""}
+Follow the workflow in your system prompt exactly. Begin by calling read_analysis, then transcribe_youtube with audioUrl set to AUDIO_URL above.`
+  : `Produce one 1m05–1m30 narrated vertical video for the "${channel.name}" channel from the source YouTube video.
 
 YOUTUBE_URL = ${youtubeUrl}
 
-Follow the workflow in your system prompt exactly. Begin by calling read_analysis, then transcribe_youtube with the URL above.`;
+Follow the workflow in your system prompt exactly. Begin by calling read_analysis, then transcribe_youtube with youtubeUrl set to the URL above.`;
 
 console.log(`\n🚀 longform-tiktok-viral-creator-agent | channel=${channel.name} | model=${CLAUDE_MODEL}`);
-console.log(`   source: ${youtubeUrl}\n`);
+console.log(`   source: ${audioUrl ? `audioUrl=${audioUrl.slice(0, 80)}…` : `youtubeUrl=${youtubeUrl}`}\n`);
 
 async function main() {
   for await (const message of query({

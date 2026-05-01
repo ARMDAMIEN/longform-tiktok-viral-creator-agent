@@ -6,6 +6,7 @@
   "scripts": {
     "start": "npx tsx src/index.ts",
     "start:banditbiographies": "CHANNEL=banditbiographies npx tsx src/index.ts",
+    "upload-source": "npx tsx scripts/upload-source.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

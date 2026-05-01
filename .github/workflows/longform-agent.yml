@@ -28,7 +28,11 @@ on:
         default: "banditbiographies"
         type: string
       youtube_url:
-        description: "Source YouTube URL (only used when mode=run or deploy-run)"
+        description: "Source YouTube URL (used only if audio_url is empty; subject to bot detection)"
+        required: false
+        type: string
+      audio_url:
+        description: "Pre-uploaded mp3 URL — RECOMMENDED. Generate locally with `npm run upload-source -- <youtube>`."
         required: false
         type: string
 
@@ -81,8 +85,8 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Validate inputs
         run: |
-          if [ -z "${{ inputs.youtube_url }}" ]; then
-            echo "::error::youtube_url input is required when mode=run or deploy-run."
+          if [ -z "${{ inputs.youtube_url }}" ] && [ -z "${{ inputs.audio_url }}" ]; then
+            echo "::error::Either youtube_url or audio_url is required when mode=run or deploy-run. Prefer audio_url (use 'npm run upload-source' locally to generate)."
             exit 1
           fi
       - name: Set per-run env on Fly machine and start it
@@ -90,6 +94,7 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           CHANNEL: ${{ inputs.channel }}
           YOUTUBE_URL: ${{ inputs.youtube_url }}
+          AUDIO_URL: ${{ inputs.audio_url }}
         run: |
           ID=$(flyctl machines list --app "$FLY_APP" --json | jq -r '[.[] | select(.config.mounts != null)][0].id')
           if [ -z "$ID" ] || [ "$ID" = "null" ]; then
@@ -97,10 +102,11 @@ jobs:
             exit 1
           fi
 
-          echo "Setting CHANNEL=$CHANNEL YOUTUBE_URL=$YOUTUBE_URL on machine $ID"
+          echo "Setting CHANNEL=$CHANNEL YOUTUBE_URL=$YOUTUBE_URL AUDIO_URL=${AUDIO_URL:0:60}... on machine $ID"
           flyctl machine update "$ID" \
             --env "CHANNEL=$CHANNEL" \
             --env "YOUTUBE_URL=$YOUTUBE_URL" \
+            --env "AUDIO_URL=$AUDIO_URL" \
             --restart no \
             --app "$FLY_APP" \
             --yes
