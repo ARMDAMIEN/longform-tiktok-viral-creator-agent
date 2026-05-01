@@ -165,7 +165,7 @@ async function normalizeVideo(input: string, output: string): Promise<void> {
     "-map", "-0:d",
     "-an", "-sn", "-dn",
     "-c:v", "libx264",
-    "-preset", "veryfast",
+    "-preset", "ultrafast",
     "-r", "30",
     "-g", "30",
     "-keyint_min", "30",
@@ -226,19 +226,31 @@ export async function renderVideo(input: RenderVideoInput): Promise<RenderVideoO
     }
   }
 
-  // Re-encode every distinct source video into assets/ (deduped by asset filename)
+  // Re-encode every distinct source video into assets/ (deduped by asset filename).
+  // Cap concurrency at 2 — matches Fly's shared-cpu-2x and avoids ffmpeg thrash.
+  const normalizeJobs: Array<() => Promise<void>> = [];
   const seen = new Set<string>();
-  const indexedSources = input.segments.flatMap((seg) => seg.clips);
   let i = 0;
   for (const seg of input.segments) {
     for (const clip of seg.clips) {
       const flat = flatClips[i++];
       if (seen.has(flat.videoAsset)) continue;
       seen.add(flat.videoAsset);
-      await normalizeVideo(resolvePath(clip.videoPath), `${assetsDir}${flat.videoAsset}`);
+      const src = resolvePath(clip.videoPath);
+      const dst = `${assetsDir}${flat.videoAsset}`;
+      normalizeJobs.push(() => normalizeVideo(src, dst));
     }
   }
-  void indexedSources;
+
+  const NORMALIZE_CONCURRENCY = 2;
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < normalizeJobs.length) {
+      const job = normalizeJobs[cursor++];
+      await job();
+    }
+  }
+  await Promise.all(Array.from({ length: NORMALIZE_CONCURRENCY }, () => worker()));
 
   const html = buildIndexHtml({
     width: RENDER_WIDTH,
