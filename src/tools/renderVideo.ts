@@ -214,14 +214,17 @@ export async function renderVideo(input: RenderVideoInput): Promise<RenderVideoO
       const count = usedNames.get(base) ?? 0;
       usedNames.set(base, count + 1);
       const asset = count === 0 ? `${stem}.mp4` : `${stem}-${count}.mp4`;
+      // Round each cumulative cursor to 3 decimals to avoid FP drift (e.g.
+      // 80.817 + 4.0 → 84.81700000000001, which trips the overlap linter).
+      const rStart = r3(cursor);
       flatClips.push({
         index: clipIndex,
-        startSec: cursor,
-        durationSec: clip.durationSec,
+        startSec: rStart,
+        durationSec: r3(clip.durationSec),
         videoAsset: asset,
         zoomDirection: clipIndex % 2 === 0 ? "in" : "out",
       });
-      cursor += clip.durationSec;
+      cursor = r3(rStart + clip.durationSec);
       clipIndex++;
     }
   }

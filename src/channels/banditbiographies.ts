@@ -41,10 +41,10 @@ export const banditBiographiesChannel: ChannelConfig = {
    - **NO text, NO captions, NO logos, NO subtitles in the AI output** — captions are added by the post-render pipeline. generate_audio is false.`,
   bodyBlock: `**Pexels clip selection rules for the body (0:08–end):**
 
-   **Pacing — multiple clips per voice segment.** TikTok long-form needs cuts every 2–5 seconds, not 8–12. Each body voice segment must be split into **2–4 visual clips** that together fill its duration. Example: a 10s segment → three clips of 3s + 4s + 3s. The hook segment (0–8s) stays as a single Seedance clip.
-   - For each voice segment, derive **2–4 distinct English keyword queries** that visualize different beats inside that segment. Example for "Farid is kidnapped with his pregnant wife": query 1 → "dark van interior night", query 2 → "pregnant woman silhouette window", query 3 → "highway headlights speeding".
+   **Pacing — 2 clips per voice segment (CAP).** TikTok long-form needs cuts every ~5 seconds. Each body voice segment must be split into **exactly 2 visual clips** that together fill its duration. Example: a 10s segment → two clips of 5s + 5s. The hook segment (0–8s) stays as a single Seedance clip. **Hard cap: total clips across the whole video must NOT exceed 17** (1 hook + 16 body). The renderer's Chrome capture cannot handle more without OOM.
+   - For each voice segment, derive **2 distinct English keyword queries** that visualize different beats inside that segment. Example for "Farid is kidnapped with his pregnant wife": query 1 → "dark van interior night", query 2 → "highway headlights speeding".
    - Search Pexels separately for each query (orientation="portrait"). Pick one clip per query. The clips become the segment's \`clips\` array, in narrative order.
-   - Decide each clip's \`durationSec\` so they sum exactly to the segment's \`durationSec\`. Aim for 2–5s per clip; never under 1.5s (jarring) or over 6s (lose pacing).
+   - Decide each clip's \`durationSec\` so they sum exactly to the segment's \`durationSec\`. Aim for 4–6s per clip; never under 3s (jarring), never over 7s (lose pacing).
    - Prefer vertical (9:16) clips; the renderer crops landscape center-cover.
    - Prefer documentary / atmospheric clips. Avoid clips with visible text, logos, branded clothing, watermarks, or recognizable faces (especially smiling people).
    - Re-rank candidates by: vertical orientation, slow or no camera move, muted/desaturated color, no text overlays. Pick the single best one per query.

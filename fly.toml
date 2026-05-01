@@ -13,7 +13,7 @@ primary_region = 'cdg'
 # 4GB is the floor for Hyperframes rendering ~22 video clips on one Chrome
 # page. Local 8GB Mac OOMs at this clip count; this VM has dedicated headroom.
 [[vm]]
-  memory = '4gb'
+  memory = '8gb'
   cpu_kind = 'shared'
   cpus = 2
 
