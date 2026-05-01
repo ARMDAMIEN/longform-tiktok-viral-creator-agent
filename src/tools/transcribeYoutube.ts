@@ -2,6 +2,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { basename } from "node:path";
 import { tmpdir } from "node:os";
+import { YoutubeTranscript } from "youtube-transcript";
 import { OPENAI_API_KEY, WHISPER_LANGUAGE, WHISPER_MODEL } from "../config.js";
 
 let cookiesPath: string | null = null;
@@ -33,6 +34,7 @@ export interface TranscribeOutput {
   durationSec: number;
   fullText: string;
   segments: TranscribeSegment[];
+  source: "ytdlp+whisper" | "youtube-captions";
 }
 
 function run(cmd: string, args: string[]): Promise<void> {
@@ -47,25 +49,13 @@ function run(cmd: string, args: string[]): Promise<void> {
 
 const OPENAI_FILE_LIMIT_BYTES = 25 * 1024 * 1024;
 
-export async function transcribeYoutube(
-  input: TranscribeInput,
-  sourcesDir: string
-): Promise<TranscribeOutput> {
+// Primary: yt-dlp → mp3 → OpenAI Whisper. Higher transcript quality.
+async function transcribeViaYtdlp(input: TranscribeInput, sourcesDir: string, base: string): Promise<TranscribeOutput> {
   if (!OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY not set in .env (used by transcribe_youtube via OpenAI Whisper API).");
   }
 
-  await mkdir(sourcesDir, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const base = `${sourcesDir}${stamp}`;
   const audioPath = `${base}.mp3`;
-
-  // yt-dlp → mono 64kbps mp3 (small enough for OpenAI's 25MB limit even on 30+ min sources).
-  // Datacenter IPs (Fly) trip YouTube's bot detection, so we authenticate with a Netscape-
-  // format cookies file shipped via the YOUTUBE_COOKIES_B64 secret. The cookies path forces
-  // yt-dlp to use the `web` client (the only one that supports cookies). The web client
-  // requires solving an `n` challenge in JS, which yt-dlp delegates to deno + the EJS
-  // solver script downloaded from GitHub at runtime via --remote-components.
   const ytCookies = await ensureYoutubeCookies();
   const ytArgs = [
     "-x",
@@ -98,12 +88,10 @@ export async function transcribeYoutube(
     headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
     body: form,
   });
-
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`OpenAI Whisper failed: ${res.status} ${res.statusText} — ${body.slice(0, 500)}`);
   }
-
   const data = (await res.json()) as {
     text: string;
     duration?: number;
@@ -123,9 +111,8 @@ export async function transcribeYoutube(
   await writeFile(
     transcriptPath,
     JSON.stringify(
-      { youtubeUrl: input.youtubeUrl, language: data.language ?? WHISPER_LANGUAGE, durationSec, segments, fullText },
-      null,
-      2
+      { source: "ytdlp+whisper", youtubeUrl: input.youtubeUrl, language: data.language ?? WHISPER_LANGUAGE, durationSec, segments, fullText },
+      null, 2
     ),
     "utf8"
   );
@@ -135,8 +122,73 @@ export async function transcribeYoutube(
     audioPath,
     transcriptPath,
     language: data.language ?? WHISPER_LANGUAGE,
-    durationSec,
-    fullText,
-    segments,
+    durationSec, fullText, segments,
+    source: "ytdlp+whisper",
   };
+}
+
+// Fallback: YouTube's public caption track. No audio download, no auth, no bot-detection.
+async function transcribeViaCaptions(input: TranscribeInput, base: string): Promise<TranscribeOutput> {
+  const items = await YoutubeTranscript.fetchTranscript(input.youtubeUrl, { lang: WHISPER_LANGUAGE });
+  if (!items || items.length === 0) {
+    throw new Error(`youtube-transcript returned no caption track for ${input.youtubeUrl} (lang=${WHISPER_LANGUAGE}). Source video may not have captions enabled.`);
+  }
+
+  const segments: TranscribeSegment[] = items.map((it) => ({
+    start: typeof it.offset === "number" ? it.offset : 0,
+    end: (typeof it.offset === "number" ? it.offset : 0) + (typeof it.duration === "number" ? it.duration : 0),
+    text: (it.text ?? "")
+      .replace(/&amp;#39;/g, "'")
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;quot;/g, '"')
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/\s+/g, " ")
+      .trim(),
+  }));
+  const fullText = segments.map((s) => s.text).join(" ").replace(/\s+/g, " ").trim();
+  const durationSec = segments.at(-1)?.end ?? 0;
+
+  const transcriptPath = `${base}.captions.json`;
+  await writeFile(
+    transcriptPath,
+    JSON.stringify(
+      { source: "youtube-captions", youtubeUrl: input.youtubeUrl, language: WHISPER_LANGUAGE, durationSec, segments, fullText },
+      null, 2
+    ),
+    "utf8"
+  );
+
+  return {
+    youtubeUrl: input.youtubeUrl,
+    audioPath: "",        // no audio in fallback path
+    transcriptPath,
+    language: WHISPER_LANGUAGE,
+    durationSec, fullText, segments,
+    source: "youtube-captions",
+  };
+}
+
+export async function transcribeYoutube(
+  input: TranscribeInput,
+  sourcesDir: string
+): Promise<TranscribeOutput> {
+  await mkdir(sourcesDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const base = `${sourcesDir}${stamp}`;
+
+  try {
+    return await transcribeViaYtdlp(input, sourcesDir, base);
+  } catch (primary) {
+    console.log(`    ⚠️  yt-dlp+whisper failed (${primary instanceof Error ? primary.message : primary}). Falling back to youtube-transcript.`);
+    try {
+      return await transcribeViaCaptions(input, base);
+    } catch (fallback) {
+      throw new Error(
+        `Both transcription paths failed. Primary (yt-dlp+whisper): ${primary instanceof Error ? primary.message : primary}. Fallback (youtube-transcript): ${fallback instanceof Error ? fallback.message : fallback}.`
+      );
+    }
+  }
 }
