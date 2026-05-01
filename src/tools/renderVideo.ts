@@ -111,6 +111,49 @@ function escapeAssText(s: string): string {
 
 interface AssCaption { start: number; end: number; text: string; }
 
+// Split a segment's text into shorter caption beats so the on-screen text
+// follows the spoken phrasing (TikTok-native pacing) instead of dumping the
+// whole 10s sentence-block at once. Splits on .!? boundaries.
+function splitTextIntoPhrases(text: string): string[] {
+  // Split keeping the punctuation with the preceding phrase.
+  const raw = text
+    .split(/(?<=[.!?…])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (raw.length === 0) return [text.trim()];
+
+  // Merge any phrase shorter than 12 chars into its neighbor — avoids
+  // jarring 0.5s flashes of "OK." or "Mais."
+  const merged: string[] = [];
+  for (const p of raw) {
+    if (merged.length && (p.length < 12 || merged[merged.length - 1].length < 12)) {
+      merged[merged.length - 1] = `${merged[merged.length - 1]} ${p}`;
+    } else {
+      merged.push(p);
+    }
+  }
+  return merged;
+}
+
+// Distribute a segment's time window across N phrases by char count.
+function captionsForSegment(segStart: number, segDur: number, text: string): AssCaption[] {
+  const phrases = splitTextIntoPhrases(text);
+  if (phrases.length <= 1) {
+    return [{ start: segStart, end: segStart + segDur, text: phrases[0] ?? text }];
+  }
+  const totalChars = phrases.reduce((acc, p) => acc + p.length, 0);
+  let cursor = segStart;
+  const caps: AssCaption[] = [];
+  phrases.forEach((p, idx) => {
+    const isLast = idx === phrases.length - 1;
+    // Last phrase absorbs any rounding residue so we end exactly at segStart+segDur.
+    const dur = isLast ? segDur - (cursor - segStart) : (p.length / totalChars) * segDur;
+    caps.push({ start: r3(cursor), end: r3(cursor + dur), text: p });
+    cursor += dur;
+  });
+  return caps;
+}
+
 function buildAssFile(captions: AssCaption[], width: number, height: number): string {
   // ASS V4+. Liberation Sans Bold ships with the Dockerfile's fonts-liberation pkg.
   // PrimaryColour: white (&H00FFFFFF). BackColour (box): black 55% alpha (&H8C000000).
@@ -201,16 +244,13 @@ export async function renderVideo(input: RenderVideoInput): Promise<RenderVideoO
     concatPath,
   ]);
 
-  // Phase 3 — emit ASS captions file.
+  // Phase 3 — emit ASS captions file. Each segment's text is split into
+  // sentence-level captions so on-screen text matches spoken phrasing.
   const captions: AssCaption[] = [];
   let segCursor = 0;
   for (const seg of input.segments) {
     if (seg.text && seg.text.trim().length > 0) {
-      captions.push({
-        start: r3(segCursor),
-        end: r3(segCursor + seg.durationSec),
-        text: seg.text.trim(),
-      });
+      captions.push(...captionsForSegment(segCursor, seg.durationSec, seg.text.trim()));
     }
     segCursor = r3(segCursor + seg.durationSec);
   }

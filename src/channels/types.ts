@@ -3,6 +3,7 @@ export interface VoiceSettings {
   similarity_boost?: number;
   style?: number;
   use_speaker_boost?: boolean;
+  speed?: number;          // ElevenLabs speed multiplier; ~0.7–1.2, default 1.0
 }
 
 export interface ChannelConfig {
