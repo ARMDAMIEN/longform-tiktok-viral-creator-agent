@@ -1,7 +1,7 @@
-import { mkdir, writeFile, copyFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { resolve as resolvePath, basename } from "node:path";
-import { RENDER_WIDTH, RENDER_HEIGHT, RENDER_FPS, PROJECT_ROOT } from "../config.js";
+import { resolve as resolvePath } from "node:path";
+import { RENDER_WIDTH, RENDER_HEIGHT, RENDER_FPS } from "../config.js";
 
 export interface RenderClipInput {
   videoPath: string;
@@ -24,121 +24,14 @@ export interface RenderVideoInput {
 }
 
 export interface RenderVideoOutput {
-  htmlPath: string;
+  htmlPath: string;       // re-purposed: path to the captions ASS file (kept for API compat)
   projectDir: string;
   videoPath: string;
   totalDurationSec: number;
 }
 
-interface FlatClip {
-  index: number;
-  startSec: number;
-  durationSec: number;
-  videoAsset: string;
-  // Ken Burns: alternate in/out per clip for visual variety
-  zoomDirection: "in" | "out";
-}
-
-interface FlatCaption {
-  index: number;
-  startSec: number;
-  durationSec: number;
-  text: string;
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-// Round to 3 decimals to avoid FP precision artifacts in HF lint.
 function r3(n: number): number {
   return Math.round(n * 1000) / 1000;
-}
-
-function buildIndexHtml(opts: {
-  width: number;
-  height: number;
-  totalDurationSec: number;
-  audioAsset: string;
-  clips: FlatClip[];
-  captions: FlatCaption[];
-}): string {
-  const { width, height, totalDurationSec, audioAsset, clips, captions } = opts;
-
-  const videoEls = clips
-    .map((c) => {
-      const src = escapeHtml(`assets/${c.videoAsset}`);
-      return `      <video id="clip-${c.index}" class="clip" data-start="${r3(c.startSec)}" data-duration="${r3(c.durationSec)}" data-track-index="0" src="${src}" muted playsinline preload="auto"></video>`;
-    })
-    .join("\n");
-
-  const captionEls = captions
-    .map((cap) => {
-      const text = escapeHtml(cap.text.trim().toUpperCase());
-      return `      <div id="cap-${cap.index}" class="clip caption" data-start="${r3(cap.startSec)}" data-duration="${r3(cap.durationSec)}" data-track-index="2"><span>${text}</span></div>`;
-    })
-    .join("\n");
-
-  // Ken Burns timeline: each clip scales subtly over its visible window.
-  // We avoid touching opacity (HF runtime handles visibility via .clip class).
-  const tlLines = clips
-    .map((c) => {
-      const from = c.zoomDirection === "in" ? 1.0 : 1.06;
-      const to = c.zoomDirection === "in" ? 1.06 : 1.0;
-      return `      tl.fromTo("#clip-${c.index} > video, video#clip-${c.index}", { transformOrigin: "50% 50%", scale: ${from} }, { scale: ${to}, duration: ${r3(c.durationSec)}, ease: "none" }, ${r3(c.startSec)});`;
-    })
-    .join("\n");
-
-  return `<!doctype html>
-<html lang="fr">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=${width}, height=${height}" />
-    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body { width: ${width}px; height: ${height}px; overflow: hidden; background: #000; font-family: "Helvetica Neue", Arial, sans-serif; }
-      #root { position: relative; width: 100%; height: 100%; background: #000; }
-      video.clip { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; will-change: transform; }
-      .clip.caption { background: transparent; position: absolute; left: 5%; right: 5%; bottom: 18%; text-align: center; pointer-events: none; }
-      .caption span {
-        display: inline-block;
-        padding: 14px 22px;
-        background: rgba(0,0,0,0.55);
-        border-radius: 8px;
-        color: #fff;
-        font-weight: 800;
-        font-size: 56px;
-        line-height: 1.15;
-        letter-spacing: 0.5px;
-        text-shadow: 0 4px 20px rgba(0,0,0,0.95), 0 0 6px rgba(0,0,0,0.9);
-        animation: capIn 0.25s ease-out both;
-      }
-      @keyframes capIn {
-        from { opacity: 0; transform: translateY(12px); }
-        to   { opacity: 1; transform: none; }
-      }
-    </style>
-  </head>
-  <body>
-    <div id="root" data-composition-id="main" data-start="0" data-duration="${r3(totalDurationSec)}" data-width="${width}" data-height="${height}">
-${videoEls}
-      <audio id="voice" data-start="0" data-duration="${r3(totalDurationSec)}" data-track-index="1" data-volume="1.0" src="assets/${escapeHtml(audioAsset)}"></audio>
-${captionEls}
-    </div>
-    <script>
-      window.__timelines = window.__timelines || {};
-      const tl = gsap.timeline({ paused: true });
-${tlLines}
-      window.__timelines["main"] = tl;
-    </script>
-  </body>
-</html>
-`;
 }
 
 function run(cmd: string, args: string[]): Promise<void> {
@@ -146,35 +39,100 @@ function run(cmd: string, args: string[]): Promise<void> {
     const p = spawn(cmd, args, { stdio: ["ignore", "inherit", "inherit"] });
     p.on("error", reject);
     p.on("exit", (code) =>
-      code === 0 ? resolve() : reject(new Error(`${cmd} ${args.join(" ")} exited with code ${code}`))
+      code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`))
     );
   });
 }
 
-// Re-encode a video to Chrome-friendly h264:
-// - drops timecode/data/subtitle streams (Pexels mp4s often carry tmcd, which Chrome rejects)
-// - normalizes to 30fps with keyframe every 1s (fixes sparse-keyframe seek failures)
-// - strips audio (we use a separate ElevenLabs track)
-// - faststart so moov atom is at the front
-async function normalizeVideo(input: string, output: string): Promise<void> {
+// Per-clip pre-render: drop data/audio streams, scale-and-crop to 9:16 cover,
+// apply subtle Ken Burns push-in/out, normalize to 30fps with 1s keyframes.
+// Output is a uniform mp4 segment ready for stream-copy concat.
+async function renderClipReady(
+  srcPath: string,
+  dstPath: string,
+  durationSec: number,
+  kenBurns: "in" | "out"
+): Promise<void> {
+  const fps = RENDER_FPS;
+  const totalFrames = Math.max(1, Math.round(durationSec * fps));
+  // zoompan z is per output frame; with d=1 the zoom evolves continuously over input.
+  const zoomExpr =
+    kenBurns === "in"
+      ? `1+0.06*on/${totalFrames}`
+      : `1.06-0.06*on/${totalFrames}`;
+
   await run("ffmpeg", [
     "-y",
     "-loglevel", "error",
-    "-i", input,
+    "-i", srcPath,
     "-map", "0:v:0",
     "-map", "-0:d",
     "-an", "-sn", "-dn",
+    "-vf", [
+      // Cover the canvas first (object-fit:cover equivalent)
+      `scale=${RENDER_WIDTH}:${RENDER_HEIGHT}:force_original_aspect_ratio=increase`,
+      `crop=${RENDER_WIDTH}:${RENDER_HEIGHT}`,
+      // Then apply Ken Burns at the final canvas size
+      `zoompan=z='${zoomExpr}':d=1:s=${RENDER_WIDTH}x${RENDER_HEIGHT}:fps=${fps}`,
+      `setsar=1`,
+    ].join(","),
+    "-t", String(durationSec),
     "-c:v", "libx264",
     "-preset", "ultrafast",
-    "-r", "30",
-    "-g", "30",
-    "-keyint_min", "30",
+    "-r", String(fps),
+    "-g", String(fps),
+    "-keyint_min", String(fps),
     "-sc_threshold", "0",
-    "-movflags", "+faststart",
     "-pix_fmt", "yuv420p",
-    "-write_tmcd", "0",
-    output,
+    "-movflags", "+faststart",
+    dstPath,
   ]);
+}
+
+function secondsToAssTime(s: number): string {
+  // ASS format: H:MM:SS.cc (centiseconds)
+  const cs = Math.max(0, Math.round(s * 100));
+  const h = Math.floor(cs / 360000);
+  const m = Math.floor((cs % 360000) / 6000);
+  const sec = Math.floor((cs % 6000) / 100);
+  const c = cs % 100;
+  return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}.${String(c).padStart(2, "0")}`;
+}
+
+function escapeAssText(s: string): string {
+  return s
+    .replace(/\\/g, "\\\\")
+    .replace(/\{/g, "\\{")
+    .replace(/\}/g, "\\}")
+    .replace(/\r?\n/g, "\\N")
+    .trim()
+    .toUpperCase();
+}
+
+interface AssCaption { start: number; end: number; text: string; }
+
+function buildAssFile(captions: AssCaption[], width: number, height: number): string {
+  // ASS V4+. Liberation Sans Bold ships with the Dockerfile's fonts-liberation pkg.
+  // PrimaryColour: white (&H00FFFFFF). BackColour (box): black 55% alpha (&H8C000000).
+  // BorderStyle 3 = opaque box. Alignment 2 = bottom-center. MarginV 300 = lift caption above bottom edge.
+  const header = `[Script Info]
+ScriptType: v4.00+
+PlayResX: ${width}
+PlayResY: ${height}
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Caption,Liberation Sans,56,&H00FFFFFF,&H00000000,&H8C000000,1,0,3,4,0,2,80,80,300,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+  const events = captions
+    .map((c) => `Dialogue: 0,${secondsToAssTime(c.start)},${secondsToAssTime(c.end)},Caption,,0,0,0,,${escapeAssText(c.text)}`)
+    .join("\n");
+  return header + events + "\n";
 }
 
 export async function renderVideo(input: RenderVideoInput): Promise<RenderVideoOutput> {
@@ -183,121 +141,111 @@ export async function renderVideo(input: RenderVideoInput): Promise<RenderVideoO
 
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const projectDir = `${input.compositionsDir}${stamp}/`;
-  const assetsDir = `${projectDir}assets/`;
-  await mkdir(assetsDir, { recursive: true });
+  const partsDir = `${projectDir}parts/`;
+  await mkdir(partsDir, { recursive: true });
 
-  // Copy audio as-is (mp3, no normalization needed)
-  const audioAsset = basename(input.audioPath);
-  await copyFile(resolvePath(input.audioPath), `${assetsDir}${audioAsset}`);
-
-  // Flatten segments into a single clip list with absolute startSec.
-  // Each clip in a segment occupies a slice of that segment's duration in order.
-  const flatClips: FlatClip[] = [];
-  const flatCaptions: FlatCaption[] = [];
-  const usedNames = new Map<string, number>();
-
-  let clipIndex = 0;
-  let captionIndex = 0;
-  for (const seg of input.segments) {
-    if (seg.text && seg.text.trim().length > 0) {
-      flatCaptions.push({
-        index: captionIndex++,
-        startSec: seg.startSec,
-        durationSec: seg.durationSec,
-        text: seg.text,
-      });
-    }
-    let cursor = seg.startSec;
-    for (const clip of seg.clips) {
-      const base = basename(clip.videoPath);
-      const stem = base.replace(/\.[^.]+$/, "");
-      const count = usedNames.get(base) ?? 0;
-      usedNames.set(base, count + 1);
-      const asset = count === 0 ? `${stem}.mp4` : `${stem}-${count}.mp4`;
-      // Round each cumulative cursor to 3 decimals to avoid FP drift (e.g.
-      // 80.817 + 4.0 → 84.81700000000001, which trips the overlap linter).
-      const rStart = r3(cursor);
-      flatClips.push({
-        index: clipIndex,
-        startSec: rStart,
-        durationSec: r3(clip.durationSec),
-        videoAsset: asset,
-        zoomDirection: clipIndex % 2 === 0 ? "in" : "out",
-      });
-      cursor = r3(rStart + clip.durationSec);
-      clipIndex++;
-    }
+  // Flatten clips with absolute startSec; round each cumulative cursor to avoid FP drift.
+  interface FlatClip {
+    startSec: number;
+    durationSec: number;
+    srcPath: string;
+    partPath: string;
+    kenBurns: "in" | "out";
   }
-
-  // Re-encode every distinct source video into assets/ (deduped by asset filename).
-  // Cap concurrency at 2 — matches Fly's shared-cpu-2x and avoids ffmpeg thrash.
-  const normalizeJobs: Array<() => Promise<void>> = [];
-  const seen = new Set<string>();
+  const flatClips: FlatClip[] = [];
+  let cursor = 0;
   let i = 0;
   for (const seg of input.segments) {
     for (const clip of seg.clips) {
-      const flat = flatClips[i++];
-      if (seen.has(flat.videoAsset)) continue;
-      seen.add(flat.videoAsset);
-      const src = resolvePath(clip.videoPath);
-      const dst = `${assetsDir}${flat.videoAsset}`;
-      normalizeJobs.push(() => normalizeVideo(src, dst));
+      const rStart = r3(cursor);
+      const rDur = r3(clip.durationSec);
+      flatClips.push({
+        startSec: rStart,
+        durationSec: rDur,
+        srcPath: resolvePath(clip.videoPath),
+        partPath: `${partsDir}${String(i).padStart(3, "0")}.mp4`,
+        kenBurns: i % 2 === 0 ? "in" : "out",
+      });
+      cursor = r3(rStart + rDur);
+      i++;
     }
   }
 
+  // Phase 1 — pre-render each clip in parallel (concurrency 2 = vCPU count).
   const NORMALIZE_CONCURRENCY = 2;
-  let cursor = 0;
+  let cursor2 = 0;
   async function worker(): Promise<void> {
-    while (cursor < normalizeJobs.length) {
-      const job = normalizeJobs[cursor++];
-      await job();
+    while (cursor2 < flatClips.length) {
+      const fc = flatClips[cursor2++];
+      console.log(`    🎬 prepping clip ${fc.partPath.split("/").pop()} (${fc.durationSec}s, KB=${fc.kenBurns})`);
+      await renderClipReady(fc.srcPath, fc.partPath, fc.durationSec, fc.kenBurns);
     }
   }
   await Promise.all(Array.from({ length: NORMALIZE_CONCURRENCY }, () => worker()));
 
-  const html = buildIndexHtml({
-    width: RENDER_WIDTH,
-    height: RENDER_HEIGHT,
-    totalDurationSec: input.totalDurationSec,
-    audioAsset,
-    clips: flatClips,
-    captions: flatCaptions,
-  });
-  const htmlPath = `${projectDir}index.html`;
-  await writeFile(htmlPath, html, "utf8");
+  // Phase 2 — concat all parts via the demuxer (stream-copy, fast).
+  const concatList = flatClips.map((fc) => `file '${fc.partPath.replace(/'/g, "'\\''")}'`).join("\n");
+  const concatListPath = `${projectDir}concat.txt`;
+  await writeFile(concatListPath, concatList, "utf8");
 
-  await writeFile(
-    `${projectDir}hyperframes.json`,
-    JSON.stringify(
-      {
-        $schema: "https://hyperframes.heygen.com/schema/hyperframes.json",
-        registry: "https://raw.githubusercontent.com/heygen-com/hyperframes/main/registry",
-        paths: { blocks: "compositions", components: "compositions/components", assets: "assets" },
-      },
-      null,
-      2
-    ),
-    "utf8"
-  );
-  await writeFile(
-    `${projectDir}meta.json`,
-    JSON.stringify({ id: stamp, name: stamp, createdAt: new Date().toISOString() }, null, 2),
-    "utf8"
-  );
-
-  const videoPath = `${input.videosDir}${stamp}.mp4`;
-  const hfBin = `${PROJECT_ROOT}node_modules/.bin/hyperframes`;
-  // -w 1: serialize Chrome workers. Default 'auto' opens N pages × M videos
-  // simultaneously, blowing past Chrome's media-element parsing budget.
-  // One worker still uses both vCPUs for ffmpeg encoding.
-  await run(hfBin, [
-    "render",
-    projectDir,
-    "-o", videoPath,
-    "-f", String(RENDER_FPS),
-    "-q", "standard",
-    "-w", "1",
+  const concatPath = `${projectDir}concat.mp4`;
+  console.log(`    🧵 concat ${flatClips.length} parts → ${concatPath.split("/").pop()}`);
+  await run("ffmpeg", [
+    "-y",
+    "-loglevel", "error",
+    "-f", "concat",
+    "-safe", "0",
+    "-i", concatListPath,
+    "-c", "copy",
+    "-movflags", "+faststart",
+    concatPath,
   ]);
 
-  return { htmlPath, projectDir, videoPath, totalDurationSec: input.totalDurationSec };
+  // Phase 3 — emit ASS captions file.
+  const captions: AssCaption[] = [];
+  let segCursor = 0;
+  for (const seg of input.segments) {
+    if (seg.text && seg.text.trim().length > 0) {
+      captions.push({
+        start: r3(segCursor),
+        end: r3(segCursor + seg.durationSec),
+        text: seg.text.trim(),
+      });
+    }
+    segCursor = r3(segCursor + seg.durationSec);
+  }
+  const assPath = `${projectDir}captions.ass`;
+  await writeFile(assPath, buildAssFile(captions, RENDER_WIDTH, RENDER_HEIGHT), "utf8");
+
+  // Phase 4 — burn captions and mux audio. Final output.
+  const videoPath = `${input.videosDir}${stamp}.mp4`;
+  console.log(`    🎞️  burning captions + muxing audio → ${videoPath.split("/").pop()}`);
+  // Subtitles filter needs the absolute path with backslash-escaped colons/quotes.
+  const assForFilter = assPath.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "\\'");
+  await run("ffmpeg", [
+    "-y",
+    "-loglevel", "error",
+    "-i", concatPath,
+    "-i", resolvePath(input.audioPath),
+    "-vf", `subtitles='${assForFilter}'`,
+    "-map", "0:v:0",
+    "-map", "1:a:0",
+    "-c:v", "libx264",
+    "-preset", "ultrafast",
+    "-r", String(RENDER_FPS),
+    "-g", String(RENDER_FPS),
+    "-pix_fmt", "yuv420p",
+    "-c:a", "aac",
+    "-b:a", "128k",
+    "-shortest",
+    "-movflags", "+faststart",
+    videoPath,
+  ]);
+
+  return {
+    htmlPath: assPath, // backward-compat field (now ASS path)
+    projectDir,
+    videoPath,
+    totalDurationSec: input.totalDurationSec,
+  };
 }

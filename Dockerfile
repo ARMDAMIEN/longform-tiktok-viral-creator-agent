@@ -1,32 +1,22 @@
 FROM node:22-bookworm-slim
 
 # System deps:
-#  - ffmpeg: required by Hyperframes + our renderVideo normalization pass
-#  - google-chrome-stable: Hyperframes captures frames via Chrome
+#  - ffmpeg: the ENTIRE render pipeline (clip prep + Ken Burns + concat + ASS subtitle burn + audio mux)
 #  - python3 + pip: yt-dlp install target
 #  - dumb-init: clean PID 1 signal handling
-#  - fonts: ensure captions render
+#  - fonts-liberation + fonts-dejavu: ASS subtitle font (Liberation Sans Bold)
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash git ca-certificates curl wget gnupg dumb-init unzip \
       ffmpeg \
       python3 python3-pip \
-      fonts-dejavu fonts-liberation \
- && install -d -m 0755 /usr/share/keyrings \
- && wget -qO- https://dl-ssl.google.com/linux/linux_signing_key.pub \
-      | gpg --dearmor -o /usr/share/keyrings/google-linux-signing.gpg \
- && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
-      > /etc/apt/sources.list.d/google-chrome.list \
- && apt-get update && apt-get install -y --no-install-recommends google-chrome-stable \
+      fonts-dejavu fonts-liberation fontconfig \
  && pip3 install --no-cache-dir --break-system-packages yt-dlp \
  && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s -- -y \
+ && fc-cache -f \
  && apt-get clean && rm -rf /var/lib/apt/lists/* \
  && useradd -ms /bin/bash agent
 
-# Pin Chrome so Hyperframes / Puppeteer never tries to download its own copy.
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable \
-    HYPERFRAMES_BROWSER_PATH=/usr/bin/google-chrome-stable \
-    NODE_ENV=production
+ENV NODE_ENV=production
 
 WORKDIR /app
 
