@@ -1,6 +1,10 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import { ELEVENLABS_API_KEY, ELEVENLABS_MODEL } from "../config.js";
 import type { VoiceSettings } from "../channels/types.js";
+
+const execFileP = promisify(execFile);
 
 export interface GenerateVoiceInput {
   text: string;
@@ -29,6 +33,46 @@ interface ElevenLabsTimestampsResponse {
     character_end_times_seconds: number[];
   };
   normalized_alignment?: ElevenLabsTimestampsResponse["alignment"];
+}
+
+function run(cmd: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const p = spawn(cmd, args, { stdio: ["ignore", "inherit", "inherit"] });
+    p.on("error", reject);
+    p.on("exit", (code) =>
+      code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`))
+    );
+  });
+}
+
+async function probeDurationSec(path: string): Promise<number> {
+  const { stdout } = await execFileP("ffprobe", [
+    "-v", "error",
+    "-show_entries", "format=duration",
+    "-of", "csv=p=0",
+    path,
+  ]);
+  return parseFloat(stdout.trim());
+}
+
+// Trim long pauses to keep delivery snappy. Strips leading silence entirely
+// and caps internal/trailing silences > 0.5s at 0.2s. Keeps natural breaths.
+async function trimSilences(srcPath: string, dstPath: string): Promise<void> {
+  await run("ffmpeg", [
+    "-y",
+    "-loglevel", "error",
+    "-i", srcPath,
+    "-af",
+    [
+      // Strip leading silence > 0.1s entirely.
+      "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-35dB",
+      // Cap any internal/trailing silence > 0.5s to 0.2s.
+      "silenceremove=stop_periods=-1:stop_duration=0.5:stop_threshold=-35dB:stop_silence=0.2",
+    ].join(","),
+    "-c:a", "libmp3lame",
+    "-b:a", "128k",
+    dstPath,
+  ]);
 }
 
 export async function generateVoice(
@@ -66,20 +110,31 @@ export async function generateVoice(
 
   await mkdir(voiceDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const rawPath = `${voiceDir}${stamp}.raw.mp3`;
   const audioPath = `${voiceDir}${stamp}.mp3`;
   const alignmentPath = `${voiceDir}${stamp}.alignment.json`;
 
-  await writeFile(audioPath, Buffer.from(data.audio_base64, "base64"));
+  // Save the raw ElevenLabs mp3, then post-process: trim silences for snappier pacing.
+  await writeFile(rawPath, Buffer.from(data.audio_base64, "base64"));
+  const rawDurationSec = data.alignment.character_end_times_seconds.at(-1) ?? 0;
+  await trimSilences(rawPath, audioPath);
+  const durationSec = await probeDurationSec(audioPath);
+  // Drop the raw file — keeps voiceDir clean.
+  await rm(rawPath, { force: true }).catch(() => {});
 
+  console.log(`    ✂️  silence-trim: ${rawDurationSec.toFixed(1)}s → ${durationSec.toFixed(1)}s (saved ${(rawDurationSec - durationSec).toFixed(1)}s)`);
+
+  // Note: alignment timestamps are from the RAW (untrimmed) audio. They no longer
+  // map 1:1 to the trimmed mp3. The agent doesn't use word-level alignment for
+  // anything (it plans segments from durationSec only) so this is safe.
   const a = data.alignment;
   const characters: VoiceCharacter[] = a.characters.map((char, i) => ({
     char,
     startSec: a.character_start_times_seconds[i],
     endSec: a.character_end_times_seconds[i],
   }));
-  const durationSec = characters.at(-1)?.endSec ?? 0;
 
-  await writeFile(alignmentPath, JSON.stringify({ durationSec, characters }, null, 2), "utf8");
+  await writeFile(alignmentPath, JSON.stringify({ durationSec, rawDurationSec, characters }, null, 2), "utf8");
 
   return { audioPath, alignmentPath, durationSec, characters };
 }
