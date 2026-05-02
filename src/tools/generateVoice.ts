@@ -55,8 +55,12 @@ async function probeDurationSec(path: string): Promise<number> {
   return parseFloat(stdout.trim());
 }
 
-// Trim long pauses to keep delivery snappy. Strips leading silence entirely
-// and caps internal/trailing silences > 0.5s at 0.2s. Keeps natural breaths.
+// Trim long pauses GENTLY:
+//   - threshold -45dB: only true silence (well below voice tails) — no word clipping
+//   - stop_duration 0.8s: only trim genuinely-long pauses (mid-sentence breaths stay)
+//   - stop_silence 0.4s: leave 0.4s buffer to avoid hard splices that cause clicks
+//   - apply low-pass + small fade on the splice with afade isn't possible cleanly inside
+//     silenceremove, so we rely on the buffer instead
 async function trimSilences(srcPath: string, dstPath: string): Promise<void> {
   await run("ffmpeg", [
     "-y",
@@ -64,10 +68,10 @@ async function trimSilences(srcPath: string, dstPath: string): Promise<void> {
     "-i", srcPath,
     "-af",
     [
-      // Strip leading silence > 0.1s entirely.
-      "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-35dB",
-      // Cap any internal/trailing silence > 0.5s to 0.2s.
-      "silenceremove=stop_periods=-1:stop_duration=0.5:stop_threshold=-35dB:stop_silence=0.2",
+      // Strip ONLY genuinely-leading silence (>0.2s).
+      "silenceremove=start_periods=1:start_duration=0.2:start_threshold=-45dB",
+      // Cap internal/trailing silence > 0.8s at 0.4s.
+      "silenceremove=stop_periods=-1:stop_duration=0.8:stop_threshold=-45dB:stop_silence=0.4",
     ].join(","),
     "-c:a", "libmp3lame",
     "-b:a", "128k",
