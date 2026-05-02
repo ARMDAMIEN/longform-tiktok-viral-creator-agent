@@ -15,9 +15,9 @@ export const banditBiographiesChannel: ChannelConfig = {
   videosDir: `${dir}videos/`,
   notionDbId: process.env.NOTION_DB_BANDITBIOGRAPHIES ?? "",
   narratorVoiceId: process.env.ELEVENLABS_VOICE_BANDITBIOGRAPHIES ?? "",
-  // Punchier, more dramatic delivery — even more expressive (lower stability)
-  // and ~10% faster pace to fight the perceived sluggishness in the hook.
-  voiceSettings: { stability: 0.25, similarity_boost: 0.85, style: 0.75, use_speaker_boost: true, speed: 1.1 },
+  // Punchier, more dramatic delivery — minimal stability for max expressive
+  // variation, high style for emphatic intonation, +15% pace.
+  voiceSettings: { stability: 0.2, similarity_boost: 0.85, style: 0.85, use_speaker_boost: true, speed: 1.15 },
   missionLine:
     "viral French long-form-for-TikTok micro-biographies in the 'biographies de voyous' / true-crime niche (organized crime, French milieu, braqueurs, parrains).",
   scriptBlock: `**Total length: 65–90 seconds of voiced script (1m05–1m30 final video).** Write in French. Tight, dense, no filler. Aim for ~150–220 words.

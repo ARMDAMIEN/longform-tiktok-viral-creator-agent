@@ -113,20 +113,46 @@ interface AssCaption { start: number; end: number; text: string; }
 
 // Split a segment's text into shorter caption beats so the on-screen text
 // follows the spoken phrasing (TikTok-native pacing) instead of dumping the
-// whole 10s sentence-block at once. Splits on .!? boundaries.
+// whole 10s sentence-block at once. Splits on .,;:!?… boundaries (any
+// punctuation that marks a clause break, not just terminal sentences).
+const MAX_CAPTION_CHARS = 50;   // hard cap; longer phrases get word-split
+const MIN_CAPTION_CHARS = 8;    // sub-this gets merged with a neighbor
+
 function splitTextIntoPhrases(text: string): string[] {
-  // Split keeping the punctuation with the preceding phrase.
+  // Split on any clause-end punctuation followed by whitespace.
   const raw = text
-    .split(/(?<=[.!?…])\s+/)
+    .split(/(?<=[.,;:!?…])\s+/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   if (raw.length === 0) return [text.trim()];
 
-  // Merge any phrase shorter than 12 chars into its neighbor — avoids
-  // jarring 0.5s flashes of "OK." or "Mais."
-  const merged: string[] = [];
+  // Hard-cap any single phrase that has no internal punctuation but is long
+  // (> MAX_CAPTION_CHARS): split it on word boundaries into ~equal chunks.
+  const wordSplit: string[] = [];
   for (const p of raw) {
-    if (merged.length && (p.length < 12 || merged[merged.length - 1].length < 12)) {
+    if (p.length <= MAX_CAPTION_CHARS) { wordSplit.push(p); continue; }
+    const words = p.split(/\s+/);
+    let buf = "";
+    for (const w of words) {
+      if (buf.length + w.length + 1 > MAX_CAPTION_CHARS && buf.length > 0) {
+        wordSplit.push(buf);
+        buf = w;
+      } else {
+        buf = buf ? `${buf} ${w}` : w;
+      }
+    }
+    if (buf) wordSplit.push(buf);
+  }
+
+  // Merge only ultra-short fragments (< MIN_CAPTION_CHARS) into a neighbor —
+  // avoids jarring 0.4s flashes of "Mais." or "OK." but keeps everything else
+  // separate for maximum on-screen pacing.
+  const merged: string[] = [];
+  for (const p of wordSplit) {
+    if (
+      merged.length &&
+      (p.length < MIN_CAPTION_CHARS || merged[merged.length - 1].length < MIN_CAPTION_CHARS)
+    ) {
       merged[merged.length - 1] = `${merged[merged.length - 1]} ${p}`;
     } else {
       merged.push(p);
